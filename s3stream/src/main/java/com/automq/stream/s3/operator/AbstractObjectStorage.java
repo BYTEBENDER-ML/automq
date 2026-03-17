@@ -24,10 +24,8 @@ import com.automq.stream.s3.metrics.MetricsLevel;
 import com.automq.stream.s3.metrics.S3StreamMetricsManager;
 import com.automq.stream.s3.metrics.TimerUtil;
 import com.automq.stream.s3.metrics.operations.S3Operation;
-import com.automq.stream.s3.metrics.stats.NetworkStats;
 import com.automq.stream.s3.metrics.stats.S3OperationStats;
 import com.automq.stream.s3.metrics.stats.StorageOperationStats;
-import com.automq.stream.s3.network.AsyncNetworkBandwidthLimiter;
 import com.automq.stream.s3.network.NetworkBandwidthLimiter;
 import com.automq.stream.s3.network.ThrottleStrategy;
 import com.automq.stream.s3.objects.ObjectAttributes;
@@ -227,15 +225,7 @@ public abstract class AbstractObjectStorage implements ObjectStorage {
         }
 
         BiFunction<ThrottleStrategy, Long, CompletableFuture<Void>> networkInboundBandwidthLimiterFunction =
-            (throttleStrategy, size) -> {
-                long startTime = System.nanoTime();
-                return networkInboundBandwidthLimiter.consume(throttleStrategy, size)
-                    .whenComplete((v, ex) ->
-                        NetworkStats.getInstance()
-                            .networkLimiterQueueTimeStats(AsyncNetworkBandwidthLimiter.Type.INBOUND, throttleStrategy)
-                            .record(TimerUtil.timeElapsedSince(startTime, TimeUnit.NANOSECONDS)));
-
-            };
+            networkInboundBandwidthLimiter::consume;
 
         long acquiredSize = end - start;
 
@@ -277,12 +267,9 @@ public abstract class AbstractObjectStorage implements ObjectStorage {
             data.release();
             return retCf;
         }
-        TimerUtil timerUtil = new TimerUtil();
         networkOutboundBandwidthLimiter
             .consume(options.throttleStrategy(), data.readableBytes())
             .whenCompleteAsync((v, ex) -> {
-                NetworkStats.getInstance().networkLimiterQueueTimeStats(AsyncNetworkBandwidthLimiter.Type.OUTBOUND, options.throttleStrategy())
-                    .record(timerUtil.elapsedAs(TimeUnit.NANOSECONDS));
                 if (ex != null) {
                     cf.completeExceptionally(ex);
                     data.release();
@@ -946,6 +933,34 @@ public abstract class AbstractObjectStorage implements ObjectStorage {
             return false;
         }
         return true;
+    }
+
+    protected <T> CompletableFuture<T> retryOnThrottle(Supplier<CompletableFuture<T>> operation,
+        S3Operation operationType, int retryCount) {
+    
+        CompletableFuture<T> cf = new CompletableFuture<>();
+        operation.get().whenComplete((result, ex) -> {
+            if (ex == null) {
+                cf.complete(result);
+                return;
+            }
+
+            Throwable cause = FutureUtil.cause(ex);
+            if (!isThrottled(cause, retryCount)) {
+                cf.completeExceptionally(cause);
+                return;
+            }
+
+            int delay = retryDelay(operationType, retryCount);
+            scheduler.schedule(() -> 
+                retryOnThrottle(operation, operationType, retryCount + 1)
+                    .whenComplete((r, e) -> {
+                        if (e != null) cf.completeExceptionally(e);
+                        else cf.complete(r);
+                    }), 
+                delay, TimeUnit.MILLISECONDS);
+        });
+        return cf;
     }
 
     protected DeleteObjectsAccumulator newDeleteObjectsAccumulator() {

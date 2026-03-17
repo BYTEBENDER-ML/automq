@@ -72,7 +72,8 @@ import io.netty.buffer.Unpooled;
     private final EventLoop eventLoop;
     private final Time time;
 
-    public SubscriberRequester(SnapshotReadPartitionsManager.Subscriber subscriber, Node node, AutoMQVersion version, AsyncSender asyncSender,
+    public SubscriberRequester(SnapshotReadPartitionsManager.Subscriber subscriber, Node node, AutoMQVersion version,
+        AsyncSender asyncSender,
         Function<Uuid, String> topicNameGetter, EventLoop eventLoop, Time time) {
         this.subscriber = subscriber;
         this.node = node;
@@ -81,6 +82,9 @@ import io.netty.buffer.Unpooled;
         this.topicNameGetter = topicNameGetter;
         this.eventLoop = eventLoop;
         this.time = time;
+    }
+
+    public void start() {
         request();
     }
 
@@ -112,7 +116,7 @@ import io.netty.buffer.Unpooled;
 
         tryReset0();
         lastRequestTime = time.milliseconds();
-        AutomqGetPartitionSnapshotRequestData data = new AutomqGetPartitionSnapshotRequestData().setSessionId(sessionId).setSessionEpoch(sessionEpoch).setVersion((short) 1);
+        AutomqGetPartitionSnapshotRequestData data = new AutomqGetPartitionSnapshotRequestData().setSessionId(sessionId).setSessionEpoch(sessionEpoch);
         if (version.isZeroZoneV2Supported()) {
             data.setVersion((short) 1);
         }
@@ -123,10 +127,17 @@ import io.netty.buffer.Unpooled;
             requestCommit = false;
             data.setRequestCommit(true);
         }
+        if (data.requestCommit()) {
+            LOGGER.info("[SNAPSHOT_SUBSCRIBE_REQUEST_COMMIT],node={},sessionId={},sessionEpoch={}", node, sessionId, sessionEpoch);
+        }
         AutomqGetPartitionSnapshotRequest.Builder builder = new AutomqGetPartitionSnapshotRequest.Builder(data);
         asyncSender.sendRequest(node, builder)
             .thenAcceptAsync(rst -> {
-                handleResponse(rst, snapshotCf);
+                try {
+                    handleResponse(rst, snapshotCf);
+                } catch (Exception e) {
+                    subscriber.reset("Exception when handle snapshot response: " + e.getMessage());
+                }
                 subscriber.unsafeRun();
             }, eventLoop)
             .exceptionally(ex -> {
@@ -191,7 +202,13 @@ import io.netty.buffer.Unpooled;
             int c2 = o2.operation.code() == SnapshotOperation.REMOVE.code() ? 0 : 1;
             return c1 - c2;
         });
-        subscriber.onNewWalEndOffset(resp.confirmWalConfig(), DefaultRecordOffset.of(Unpooled.wrappedBuffer(resp.confirmWalEndOffset())));
+        short requestVersion = clientResponse.requestHeader().apiVersion();
+        if (resp.confirmWalEndOffset() != null && resp.confirmWalEndOffset().length > 0) {
+            // zerozone v2
+            subscriber.onNewWalEndOffset(resp.confirmWalConfig(),
+                DefaultRecordOffset.of(Unpooled.wrappedBuffer(resp.confirmWalEndOffset())),
+                requestVersion >= 2 ? resp.confirmWalDeltaData() : null);
+        }
         batch.operations.add(SnapshotWithOperation.snapshotMark(snapshotCf));
         subscriber.onNewOperationBatch(batch);
     }

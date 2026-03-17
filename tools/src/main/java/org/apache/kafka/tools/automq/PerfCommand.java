@@ -24,6 +24,7 @@ import org.apache.kafka.tools.automq.perf.ConsumerService;
 import org.apache.kafka.tools.automq.perf.PerfConfig;
 import org.apache.kafka.tools.automq.perf.ProducerService;
 import org.apache.kafka.tools.automq.perf.Stats;
+import org.apache.kafka.tools.automq.perf.StatsCollector;
 import org.apache.kafka.tools.automq.perf.StatsCollector.Result;
 import org.apache.kafka.tools.automq.perf.StatsCollector.StopCondition;
 import org.apache.kafka.tools.automq.perf.TopicService;
@@ -174,7 +175,7 @@ public class PerfCommand implements AutoCloseable {
             consumerService.pause();
             long backlogStart = System.currentTimeMillis();
             collectStats(Duration.ofSeconds(config.backlogDurationSeconds));
-            long backlogEnd = System.nanoTime();
+            long backlogEnd = StatsCollector.currentNanos();
 
             LOGGER.info("Resetting consumer offsets and resuming...");
             consumerService.resetOffset(backlogStart, TimeUnit.SECONDS.toMillis(config.groupStartDelaySeconds));
@@ -309,13 +310,10 @@ public class PerfCommand implements AutoCloseable {
         int randomBytes = (int) (size * randomRatio);
         int staticBytes = size - randomBytes;
         byte[] staticPayload = new byte[staticBytes];
-        r.nextBytes(staticPayload);
-
         if (randomBytes == 0) {
             // all payloads are the same, no need to create multiple copies
             return List.of(staticPayload);
         }
-
         List<byte[]> payloads = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             byte[] payload = new byte[size];

@@ -181,7 +181,7 @@ public class FailoverControlManager implements AutoCloseable {
                 node.getNodeId(),
                 // There are node epochs in both streamControlManager and nodeControlManager, and they are the same in most cases.
                 // However, in some rare cases, the node epoch in streamControlManager may be updated earlier than the node epoch in nodeControlManager.
-                // So we use the node epoch in nodeControlManager as the source of truth.
+                // So we use the node epoch in streamControlManager as the source of truth.
                 nodeEpochMap.get(node.getNodeId()),
                 node.getWalConfig(),
                 node.getTags(),
@@ -265,22 +265,6 @@ public class FailoverControlManager implements AutoCloseable {
             .filter(NodeRuntimeMetadata::shouldFailover)
             .map(DefaultFailedWal::from)
             .collect(Collectors.toCollection(ArrayList::new));
-        maybeRemoveControllerNode(allNodes, result);
         return result;
-    }
-
-    private static void maybeRemoveControllerNode(List<NodeRuntimeMetadata> allNodes, List<FailedWal> failedWALList) {
-        long inactiveControllerCount = allNodes.stream()
-            .filter(NodeRuntimeMetadata::isController)
-            .filter(node -> !node.isActive())
-            .count();
-        if (inactiveControllerCount > 1) {
-            LOGGER.warn("{} controller nodes is inactive, will not failover any controller node", inactiveControllerCount);
-            Set<Integer> controllerNodeIds = allNodes.stream()
-                .filter(NodeRuntimeMetadata::isController)
-                .map(NodeRuntimeMetadata::id)
-                .collect(Collectors.toSet());
-            failedWALList.removeIf(wal -> controllerNodeIds.contains(wal.nodeId()));
-        }
     }
 }

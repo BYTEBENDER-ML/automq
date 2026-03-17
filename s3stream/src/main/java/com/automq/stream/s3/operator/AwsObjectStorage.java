@@ -57,6 +57,7 @@ import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.exception.ApiCallAttemptTimeoutException;
 import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.http.HttpStatusCode;
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
@@ -128,7 +129,10 @@ public class AwsObjectStorage extends AbstractObjectStorage {
         }
         this.checksumAlgorithm = checksumAlgorithm;
 
-        Supplier<S3AsyncClient> clientSupplier = () -> newS3Client(bucketURI.endpoint(), bucketURI.region(), bucketURI.extensionBool(PATH_STYLE_KEY, false), credentialsProviders, getMaxObjectStorageConcurrency());
+        long apiCallTimeoutMs = Long.parseLong(bucketURI.extensionString(BucketURI.API_CALL_TIMEOUT_KEY, "30000"));
+        long apiCallAttemptTimeoutMs = Long.parseLong(bucketURI.extensionString(BucketURI.API_CALL_ATTEMPT_TIMEOUT_KEY, "10000"));
+
+        Supplier<S3AsyncClient> clientSupplier = () -> newS3Client(bucketURI.endpoint(), bucketURI.region(), bucketURI.extensionBool(PATH_STYLE_KEY, false), credentialsProviders, getMaxObjectStorageConcurrency(), apiCallTimeoutMs, apiCallAttemptTimeoutMs);
         this.writeS3Client = clientSupplier.get();
         this.readS3Client = readWriteIsolate ? clientSupplier.get() : writeS3Client;
     }
@@ -180,7 +184,8 @@ public class AwsObjectStorage extends AbstractObjectStorage {
         CompletableFuture<ByteBuf> cf = new CompletableFuture<>();
         readS3Client.getObject(builder.build(), AsyncResponseTransformer.toPublisher())
             .thenAccept(responsePublisher -> {
-                CompositeByteBuf buf = Unpooled.compositeBuffer();
+                // Set maxNumComponents to Integer.MAX_VALUE to avoid #consolidateIfNeeded causing a GC issue.
+                CompositeByteBuf buf = Unpooled.compositeBuffer(Integer.MAX_VALUE);
                 responsePublisher.subscribe(bytes -> {
                     // the aws client will copy DefaultHttpContent to heap ByteBuffer
                     buf.addComponent(true, Unpooled.wrappedBuffer(bytes));
@@ -305,21 +310,23 @@ public class AwsObjectStorage extends AbstractObjectStorage {
             .delete(Delete.builder().objects(toDeleteKeys).build())
             .build();
 
-        CompletableFuture<Void> cf = new CompletableFuture<>();
-        this.writeS3Client.deleteObjects(request)
-            .thenAccept(resp -> {
-                try {
-                    checkDeleteObjectsResponse(resp);
-                    cf.complete(null);
-                } catch (Throwable ex) {
+        return retryOnThrottle(() -> {
+            CompletableFuture<Void> cf = new CompletableFuture<>();
+            writeS3Client.deleteObjects(request)
+                .thenAccept(resp -> {
+                    try {
+                        checkDeleteObjectsResponse(resp);
+                        cf.complete(null);
+                    } catch (Throwable ex) {
+                        cf.completeExceptionally(ex);
+                    }
+                })
+                .exceptionally(ex -> {
                     cf.completeExceptionally(ex);
-                }
-            })
-            .exceptionally(ex -> {
-                cf.completeExceptionally(ex);
-                return null;
-            });
-        return cf;
+                    return null;
+                });
+            return cf;
+        }, S3Operation.DELETE_OBJECTS, 0);
     }
 
     @Override
@@ -400,7 +407,7 @@ public class AwsObjectStorage extends AbstractObjectStorage {
     }
 
     protected List<AwsCredentialsProvider> credentialsProviders0(BucketURI bucketURI) {
-        return List.of(new AutoMQStaticCredentialsProvider(bucketURI), DefaultCredentialsProvider.create());
+        return List.of(new AutoMQStaticCredentialsProvider(bucketURI), DefaultCredentialsProvider.builder().build());
     }
 
     private String range(long start, long end) {
@@ -412,7 +419,7 @@ public class AwsObjectStorage extends AbstractObjectStorage {
     }
 
     protected S3AsyncClient newS3Client(String endpoint, String region, boolean forcePathStyle,
-        List<AwsCredentialsProvider> credentialsProviders, int maxConcurrency) {
+                                        List<AwsCredentialsProvider> credentialsProviders, int maxConcurrency, long apiCallTimeoutMs, long apiCallAttemptTimeoutMs) {
         S3AsyncClientBuilder builder = S3AsyncClient.builder().region(Region.of(region));
         if (StringUtils.isNotBlank(endpoint)) {
             builder.endpointOverride(URI.create(endpoint));
@@ -426,14 +433,15 @@ public class AwsObjectStorage extends AbstractObjectStorage {
         builder.httpClient(httpClient);
         builder.serviceConfiguration(c -> c.pathStyleAccessEnabled(forcePathStyle));
         builder.credentialsProvider(newCredentialsProviderChain(credentialsProviders));
-        builder.overrideConfiguration(clientOverrideConfiguration());
+        builder.overrideConfiguration(clientOverrideConfiguration(apiCallTimeoutMs, apiCallAttemptTimeoutMs));
         return builder.build();
     }
 
-    protected ClientOverrideConfiguration clientOverrideConfiguration() {
+    protected ClientOverrideConfiguration clientOverrideConfiguration(long apiCallTimeoutMs, long apiCallAttemptTimeoutMs) {
         return ClientOverrideConfiguration.builder()
-            .apiCallTimeout(Duration.ofSeconds(30))
-            .apiCallAttemptTimeout(Duration.ofSeconds(10))
+            .apiCallTimeout(Duration.ofMillis(apiCallTimeoutMs))
+            .apiCallAttemptTimeout(Duration.ofMillis(apiCallAttemptTimeoutMs))
+            .retryStrategy(RetryMode.STANDARD)
             .build();
     }
 

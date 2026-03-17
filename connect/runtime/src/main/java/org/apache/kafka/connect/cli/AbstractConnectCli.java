@@ -19,6 +19,11 @@ package org.apache.kafka.connect.cli;
 import org.apache.kafka.common.utils.Exit;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.common.utils.Utils;
+import org.apache.kafka.connect.automq.az.AzMetadataProviderHolder;
+import org.apache.kafka.connect.automq.log.ConnectLogUploader;
+import org.apache.kafka.connect.automq.metrics.MetricsConfigConstants;
+import org.apache.kafka.connect.automq.metrics.OpenTelemetryMetricsReporter;
+import org.apache.kafka.connect.automq.s3.S3PermissionProbe;
 import org.apache.kafka.connect.connector.policy.ConnectorClientConfigOverridePolicy;
 import org.apache.kafka.connect.runtime.Connect;
 import org.apache.kafka.connect.runtime.Herder;
@@ -33,9 +38,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * Common initialization logic for Kafka Connect, intended for use by command line utilities
@@ -45,7 +53,9 @@ import java.util.Map;
  */
 public abstract class AbstractConnectCli<H extends Herder, T extends WorkerConfig> {
 
-    private static final Logger log = LoggerFactory.getLogger(AbstractConnectCli.class);
+    private static Logger getLogger() {
+        return LoggerFactory.getLogger(AbstractConnectCli.class);
+    }
     private final String[] args;
     private final Time time = Time.SYSTEM;
 
@@ -83,7 +93,6 @@ public abstract class AbstractConnectCli<H extends Herder, T extends WorkerConfi
      */
     public void run() {
         if (args.length < 1 || Arrays.asList(args).contains("--help")) {
-            log.info("Usage: {}", usage());
             Exit.exit(1);
         }
 
@@ -92,6 +101,20 @@ public abstract class AbstractConnectCli<H extends Herder, T extends WorkerConfi
             Map<String, String> workerProps = !workerPropsFile.isEmpty() ?
                     Utils.propsToStringMap(Utils.loadProps(workerPropsFile)) : Collections.emptyMap();
             String[] extraArgs = Arrays.copyOfRange(args, 1, args.length);
+
+            // AutoMQ inject start
+            // Initialize S3 log uploader if the target bucket is ready
+            S3PermissionProbe.ProbeResult logProbe = S3PermissionProbe.probeLogUploader(workerProps);
+            if (logProbe.shouldInitialize()) {
+                ConnectLogUploader.initialize(workerProps);
+            } else if (logProbe.isRequired()) {
+                getLogger().warn("Skip starting S3 log uploader: {}", logProbe.reason());
+            }
+            AzMetadataProviderHolder.initialize(workerProps);
+
+            initializeTelemetry(workerProps);
+            // AutoMQ inject end
+
             Connect<H> connect = startConnect(workerProps);
             processExtraArgs(connect, extraArgs);
 
@@ -99,7 +122,7 @@ public abstract class AbstractConnectCli<H extends Herder, T extends WorkerConfi
             connect.awaitStop();
 
         } catch (Throwable t) {
-            log.error("Stopping due to error", t);
+            getLogger().error("Stopping due to error", t);
             Exit.exit(2);
         }
     }
@@ -111,17 +134,17 @@ public abstract class AbstractConnectCli<H extends Herder, T extends WorkerConfi
      * @return a started instance of {@link Connect}
      */
     public Connect<H> startConnect(Map<String, String> workerProps) {
-        log.info("Kafka Connect worker initializing ...");
+        getLogger().info("Kafka Connect worker initializing ...");
         long initStart = time.hiResClockMs();
 
         WorkerInfo initInfo = new WorkerInfo();
         initInfo.logAll();
 
-        log.info("Scanning for plugin classes. This might take a moment ...");
+        getLogger().info("Scanning for plugin classes. This might take a moment ...");
         Plugins plugins = new Plugins(workerProps);
         plugins.compareAndSwapWithDelegatingLoader();
         T config = createConfig(workerProps);
-        log.debug("Kafka cluster ID: {}", config.kafkaClusterId());
+        getLogger().debug("Kafka cluster ID: {}", config.kafkaClusterId());
 
         RestClient restClient = new RestClient(config);
 
@@ -138,15 +161,94 @@ public abstract class AbstractConnectCli<H extends Herder, T extends WorkerConfi
         H herder = createHerder(config, workerId, plugins, connectorClientConfigOverridePolicy, restServer, restClient);
 
         final Connect<H> connect = new Connect<>(herder, restServer);
-        log.info("Kafka Connect worker initialization took {}ms", time.hiResClockMs() - initStart);
+        getLogger().info("Kafka Connect worker initialization took {}ms", time.hiResClockMs() - initStart);
         try {
             connect.start();
         } catch (Exception e) {
-            log.error("Failed to start Connect", e);
+            getLogger().error("Failed to start Connect", e);
             connect.stop();
             Exit.exit(3);
         }
 
         return connect;
+    }
+
+    private void initializeTelemetry(Map<String, String> workerProps) {
+        List<String> exporterUris = parseTelemetryExporterUris(workerProps.get(MetricsConfigConstants.EXPORTER_URI_KEY));
+        if (exporterUris.isEmpty()) {
+            getLogger().info("AutoMQ telemetry exporter URI is not configured; skipping telemetry initialization.");
+            return;
+        }
+
+        S3PermissionProbe.ProbeResult metricsProbe = S3PermissionProbe.probeMetrics(workerProps);
+        if (!metricsProbe.isRequired()) {
+            startTelemetry(workerProps, exporterUris, false);
+            return;
+        }
+
+        if (metricsProbe.shouldInitialize()) {
+            startTelemetry(workerProps, exporterUris, false);
+            return;
+        }
+
+        List<String> filteredExporters = filterOutOpsExporters(exporterUris);
+        if (filteredExporters.isEmpty()) {
+            getLogger().warn("Skip starting AutoMQ telemetry exporter: {}. S3 exporter unavailable and no alternative exporters configured.", metricsProbe.reason());
+            return;
+        }
+
+        getLogger().warn("AutoMQ S3 telemetry exporter disabled ({}). Continuing with exporters: {}",
+            metricsProbe.reason(), joinExporterUris(filteredExporters));
+        startTelemetry(workerProps, filteredExporters, true);
+    }
+
+    private static List<String> parseTelemetryExporterUris(String exporterConfig) {
+        List<String> exporters = new ArrayList<>();
+        if (exporterConfig == null) {
+            return exporters;
+        }
+        String[] entries = exporterConfig.split(",");
+        for (String entry : entries) {
+            String trimmed = entry.trim();
+            if (!trimmed.isEmpty()) {
+                exporters.add(trimmed);
+            }
+        }
+        return exporters;
+    }
+
+    private static List<String> filterOutOpsExporters(List<String> exporters) {
+        List<String> filtered = new ArrayList<>(exporters.size());
+        for (String exporter : exporters) {
+            if (!isOpsExporter(exporter)) {
+                filtered.add(exporter);
+            }
+        }
+        return filtered;
+    }
+
+    private static boolean isOpsExporter(String exporter) {
+        try {
+            URI uri = URI.create(exporter);
+            String scheme = uri.getScheme();
+            return scheme != null && scheme.equalsIgnoreCase("ops");
+        } catch (Exception e) {
+            getLogger().warn("Invalid AutoMQ telemetry exporter URI '{}', ignoring for S3 readiness gating", exporter, e);
+            return false;
+        }
+    }
+
+    private static String joinExporterUris(List<String> exporters) {
+        return String.join(",", exporters);
+    }
+
+    private void startTelemetry(Map<String, String> workerProps, List<String> exporters, boolean removeS3TelemetryConfig) {
+        Properties telemetryProps = new Properties();
+        telemetryProps.putAll(workerProps);
+        telemetryProps.put(MetricsConfigConstants.EXPORTER_URI_KEY, joinExporterUris(exporters));
+        if (removeS3TelemetryConfig) {
+            telemetryProps.remove(MetricsConfigConstants.S3_BUCKET);
+        }
+        OpenTelemetryMetricsReporter.initializeTelemetry(telemetryProps);
     }
 }

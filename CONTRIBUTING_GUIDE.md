@@ -9,6 +9,42 @@ or [Slack](https://join.slack.com/t/automq/shared_invite/zt-29h17vye9-thf31ebIVL
 Before getting started, please review AutoMQ's Code of Conduct. Everyone interacting in Slack or WeChat
 follow [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Suggested Onboarding Path for New Contributors
+
+## Quick Start for First-Time Contributors (Recommended)
+
+If you are new to AutoMQ, we recommend starting with the simplest path before diving into local builds.
+
+**Option 1: Quick exploration (recommended for beginners)**
+- Run AutoMQ using Docker as described in the README
+- Verify you can:
+  - Start the broker
+  - Create a topic
+  - Produce and consume messages
+- This helps you understand AutoMQ behavior without local environment setup
+
+**Option 2: DevBox local development (recommended for code contributions)**
+- Use the Docker Compose-based DevBox to start a local AutoMQ cluster with MinIO and JDWP debug ports
+- Quick start:
+  - `cd devbox`
+  - `just start-build` (single node) or `just start-build 3` (3-node cluster)
+- Useful shortcuts: `just topic-list`, `just produce <topic>`, `just logs`
+- See full instructions in [devbox/README.md](devbox/README.md)
+
+**Option 3: Manual local development setup**
+- Follow the steps below to build and run AutoMQ locally with IDEA/manual configuration
+- This path is useful when you need full control over local components and configs
+
+> Tip: If you encounter setup issues, check [devbox/README.md](devbox/README.md), “Local Debug with IDEA”, and S3 configuration sections below.
+
+
+If you are new to AutoMQ, it is recommended to first deploy and run AutoMQ using Docker as described in the README.
+This helps you quickly understand AutoMQ’s core concepts and behavior without local environment complexity.
+
+After gaining familiarity, contributors who want to work on code can follow the steps in this guide to build and run AutoMQ locally.
+For most contributors, we recommend starting with DevBox (`devbox/README.md`) and using the manual setup only when deeper environment customization is needed.
+
+
 ## Code Contributions
 
 ### Finding or Reporting Issues
@@ -52,6 +88,9 @@ Pull Request reviews are done on a regular basis.
 | Compiling requirements | JDK 17     |
 | Compiling requirements | Scala 2.13 |
 | Running requirements   | JDK 17     |
+
+> Note: At least 8GB RAM is recommended for local development and debugging.
+
 
 > Tips: You can refer the [document](https://www.scala-lang.org/download/2.13.12.html) to install Scala 2.13
 

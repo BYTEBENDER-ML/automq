@@ -13,7 +13,7 @@
 </p>
 
 [![Linkedin Badge](https://img.shields.io/badge/-LinkedIn-blue?style=flat-square&logo=Linkedin&logoColor=white&link=https://www.linkedin.com/company/automq)](https://www.linkedin.com/company/automq)
-[![](https://badgen.net/badge/Slack/Join%20AutoMQ/0abd59?icon=slack)](https://join.slack.com/t/automq/shared_invite/zt-29h17vye9-thf31ebIVL9oXuRdACnOIA)
+[![](https://badgen.net/badge/Slack/Join%20AutoMQ/0abd59?icon=slack)](https://go.automq.com/slack)
 [![](https://img.shields.io/badge/AutoMQ%20vs.%20Kafka(Cost)-yellow)](https://www.automq.com/blog/automq-vs-apache-kafka-a-real-aws-cloud-bill-comparison?utm_source=github_automq)
 [![](https://img.shields.io/badge/AutoMQ%20vs.%20Kafka(Performance)-orange)](https://www.automq.com/docs/automq/benchmarks/automq-vs-apache-kafka-benchmarks-and-cost?utm_source=github_automq)
 [![Gurubase](https://img.shields.io/badge/Gurubase-Ask%20AutoMQ%20Guru-006BFF)](https://gurubase.io/g/automq)
@@ -23,15 +23,32 @@
 </div>
 
 <div align="center">
-    
-<img width="97%" alt="automq-solgan" src="https://github.com/user-attachments/assets/97fcde87-19ef-42a9-9835-01b63516d497" />
+
+<img width="97%" alt="automq-solgan" src="https://github.com/user-attachments/assets/bdf6c5f5-7fe1-4004-8e15-54f1aa6bc32f" />
 
 <a href="https://www.youtube.com/watch?v=IB8sh639Rsg" target="_blank">
     <img alt="Grab" src="https://github.com/user-attachments/assets/01668da4-3916-4f49-97af-18f91b25f8c1" width="19%" />
 </a> 
+
+<a href="https://www.automq.com/customer" target="_blank">
+    <img alt="Avia" src="https://github.com/user-attachments/assets/d2845e1c-caf4-444a-93f0-97b13c9c8490" width="19%" />
+</a>
+<a href="https://www.automq.com/customer" target="_blank">
+    <img alt="Tencent" src="https://github.com/user-attachments/assets/2bdd205f-38c1-4110-9af1-d4c782db3395" width="19%" />
+</a>
+<a href="https://www.automq.com/customer" target="_blank">
+    <img alt="Honda" src="https://github.com/user-attachments/assets/ee65af29-8ee3-404b-bf81-a004fe0c327c" width="19%" />
+</a>
+<a href="https://www.automq.com/customer" target="_blank">
+    <img alt="Trip" src="https://github.com/user-attachments/assets/0cb4ae63-6dc1-43dc-9416-625a08dca2e5" width="19%" />
+</a>
+<a href="https://www.automq.com/customer" target="_blank">
+    <img alt="LG" src="https://github.com/user-attachments/assets/ed9e0f87-abc6-4552-977c-f342ecb105a0" width="19%" />
+</a>
 <a href="https://www.automq.com/blog/jdcom-automq-cubefs-trillion-scale-kafka-messaging" target="_blank">
     <img alt="JD" src="https://github.com/user-attachments/assets/a7a86d2c-66fa-4575-b181-6cf56a31f880" width="19%" />
 </a> 
+
 <a href="https://www.automq.com/blog/automq-help-geely-auto-solve-the-pain-points-of-kafka-elasticity-in-the-v2x-scenario" target="_blank">
     <img alt="Geely" src="https://github.com/user-attachments/assets/d61f7c51-0d80-4290-a428-a941441c7ec9" width="19%" />
 </a>
@@ -68,7 +85,14 @@
 - [Asia's GOAT, Poizon uses AutoMQ Kafka to build observability platform for massive data(30 GB/s)](https://www.automq.com/blog/asiax27s-goat-poizon-uses-automq-kafka-to-build-a-new-generation-observability-platform-for-massive-data?utm_source=github_automq)
 - [AutoMQ Helps CaoCao Mobility Address Kafka Scalability During Holidays](https://www.automq.com/blog/automq-helps-caocao-mobility-address-kafka-scalability-issues-during-mid-autumn-and-national-day?utm_source=github_automq)
 
-## ⛄ Get started with AutoMQ
+
+### Prerequisites
+Before running AutoMQ locally, please ensure:
+- Docker version 20.x or later
+- Docker Compose v2
+- At least 4 GB RAM allocated to Docker
+- Ports 9092 and 9000 are available on your system
+
 
 > [!Tip]
 > Deploying a production-ready AutoMQ cluster is challenging. This Quick Start is only for evaluating AutoMQ features and is not suitable for production use. For production deployment best practices, please [contact](https://www.automq.com/contact) our community for support.
@@ -139,7 +163,7 @@ Star AutoMQ on GitHub for instant updates on new releases.
 ## 💬 Community
 You can join the following groups or channels to discuss or ask questions about AutoMQ:
 - Ask questions or report a bug by [GitHub Issues](https://github.com/AutoMQ/automq/issues)
-- Discuss about AutoMQ or Kafka by [Slack](https://join.slack.com/t/automq/shared_invite/zt-29h17vye9-thf31ebIVL9oXuRdACnOIA) or [Wechat Group](docs/images/automq-wechat.png)
+- Discuss about AutoMQ or Kafka by [Slack](https://go.automq.com/slack) or [Wechat Group](docs/images/automq-wechat.png)
 
 
 ## 👥 How to contribute

@@ -57,6 +57,7 @@ import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.exception.ApiCallAttemptTimeoutException;
 import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.http.HttpStatusCode;
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
@@ -441,7 +442,7 @@ public class AwsObjectStorage extends AbstractObjectStorage {
         return ClientOverrideConfiguration.builder()
             .apiCallTimeout(Duration.ofMillis(apiCallTimeoutMs))
             .apiCallAttemptTimeout(Duration.ofMillis(apiCallAttemptTimeoutMs))
-            .retryStrategy(RetryMode.STANDARD)
+            .retryPolicy(RetryPolicy.forRetryMode(RetryMode.STANDARD))
             .build();
     }
 
